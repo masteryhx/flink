@@ -25,10 +25,13 @@ import org.apache.calcite.rel.{RelNode, RelWriter, SingleRel}
 import org.apache.flink.api.java.functions.NullByteKeySelector
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
-import org.apache.flink.table.api.{StreamQueryConfig, StreamTableEnvImpl, TableConfig}
+import org.apache.flink.table.api.TableConfig
 import org.apache.flink.table.plan.nodes.CommonAggregate
+import org.apache.flink.table.plan.rules.datastream.DataStreamRetractionRules
 import org.apache.flink.table.plan.schema.RowSchema
+import org.apache.flink.table.planner.StreamPlanner
 import org.apache.flink.table.runtime.CRowKeySelector
+import org.apache.flink.table.runtime.aggregate.AggregateUtil
 import org.apache.flink.table.runtime.aggregate.AggregateUtil.CalcitePair
 import org.apache.flink.table.runtime.types.{CRow, CRowTypeInfo}
 import org.apache.flink.table.util.Logging
@@ -91,22 +94,34 @@ abstract class DataStreamGroupAggregateBase(
         inputSchema.relDataType, groupings, getRowType, namedAggregates, Nil))
   }
 
-  protected def createKeyedProcessFunction[K](
-    tableConfig: TableConfig,
-    queryConfig: StreamQueryConfig): KeyedProcessFunction[K, CRow, CRow]
+  private def createKeyedProcessFunction[K](
+    tableConfig: TableConfig): KeyedProcessFunction[K, CRow, CRow] = {
 
-  override def translateToPlan(
-      tableEnv: StreamTableEnvImpl,
-      queryConfig: StreamQueryConfig): DataStream[CRow] = {
+    AggregateUtil.createDataStreamGroupAggregateFunction[K](
+      tableConfig,
+      false,
+      inputSchema.typeInfo,
+      None,
+      namedAggregates,
+      inputSchema.relDataType,
+      inputSchema.fieldTypeInfos,
+      schema.relDataType,
+      groupings,
+      DataStreamRetractionRules.isAccRetract(this),
+      DataStreamRetractionRules.isAccRetract(getInput))
+  }
 
-    if (groupings.length > 0 && queryConfig.getMinIdleStateRetentionTime < 0) {
+  override def translateToPlan(planner: StreamPlanner): DataStream[CRow] = {
+    val config = planner.getConfig
+
+    if (groupings.length > 0 && config.getMinIdleStateRetentionTime < 0) {
       LOG.warn(
         "No state retention interval configured for a query which accumulates state. " +
         "Please provide a query configuration with valid retention interval to prevent excessive " +
         "state size. You may specify a retention time of 0 to not clean up the state.")
     }
 
-    val inputDS = input.asInstanceOf[DataStreamRel].translateToPlan(tableEnv, queryConfig)
+    val inputDS = input.asInstanceOf[DataStreamRel].translateToPlan(planner)
 
     val outRowType = CRowTypeInfo(schema.typeInfo)
 
@@ -126,7 +141,7 @@ abstract class DataStreamGroupAggregateBase(
       if (groupings.nonEmpty) {
         inputDS
         .keyBy(new CRowKeySelector(groupings, inputSchema.projectedTypeInfo(groupings)))
-        .process(createKeyedProcessFunction[Row](tableEnv.getConfig, queryConfig))
+        .process(createKeyedProcessFunction[Row](config))
         .returns(outRowType)
         .name(keyedAggOpName)
         .asInstanceOf[DataStream[CRow]]
@@ -135,7 +150,7 @@ abstract class DataStreamGroupAggregateBase(
       else {
         inputDS
         .keyBy(new NullByteKeySelector[CRow])
-        .process(createKeyedProcessFunction[JByte](tableEnv.getConfig, queryConfig))
+        .process(createKeyedProcessFunction[JByte](config))
         .setParallelism(1)
         .setMaxParallelism(1)
         .returns(outRowType)

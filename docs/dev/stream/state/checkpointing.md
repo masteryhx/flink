@@ -32,7 +32,7 @@ any type of more elaborate operation.
 In order to make state fault tolerant, Flink needs to **checkpoint** the state. Checkpoints allow Flink to recover state and positions
 in the streams to give the application the same semantics as a failure-free execution.
 
-The [documentation on streaming fault tolerance]({{ site.baseurl }}/internals/stream_checkpointing.html) describes in detail the technique behind Flink's streaming fault tolerance mechanism.
+The [documentation on streaming fault tolerance]({{ site.baseurl }}/learn-flink/fault_tolerance.html) describes in detail the technique behind Flink's streaming fault tolerance mechanism.
 
 
 ## Prerequisites
@@ -76,6 +76,8 @@ Other parameters for checkpointing include:
 
   - *fail/continue task on checkpoint errors*: This determines if a task will be failed if an error occurs in the execution of the task's checkpoint procedure. This is the default behaviour. Alternatively, when this is disabled, the task will simply decline the checkpoint to the checkpoint coordinator and continue running.
 
+  - *prefer checkpoint for recovery*: This determines if a job will fallback to latest checkpoint even when there are more recent savepoints available to potentially reduce recovery time.
+
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
 {% highlight java %}
@@ -100,6 +102,9 @@ env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
 
 // enable externalized checkpoints which are retained after job cancellation
 env.getCheckpointConfig().enableExternalizedCheckpoints(ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
+
+// allow job recovery fallback to checkpoint when there is a more recent savepoint
+env.getCheckpointConfig().setPreferCheckpointForRecovery(true);
 {% endhighlight %}
 </div>
 <div data-lang="scala" markdown="1">
@@ -127,6 +132,34 @@ env.getCheckpointConfig.setFailTasksOnCheckpointingErrors(false)
 env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
 {% endhighlight %}
 </div>
+<div data-lang="python" markdown="1">
+{% highlight python %}
+env = StreamExecutionEnvironment.get_execution_environment()
+
+# start a checkpoint every 1000 ms
+env.enable_checkpointing(1000)
+
+# advanced options:
+
+# set mode to exactly-once (this is the default)
+env.get_checkpoint_config().set_checkpointing_mode(CheckpointingMode.EXACTLY_ONCE)
+
+# make sure 500 ms of progress happen between checkpoints
+env.get_checkpoint_config().set_min_pause_between_checkpoints(500)
+
+# checkpoints have to complete within one minute, or are discarded
+env.get_checkpoint_config().set_checkpoint_timeout(60000)
+
+# allow only one checkpoint to be in progress at the same time
+env.get_checkpoint_config().set_max_concurrent_checkpoints(1)
+
+# enable externalized checkpoints which are retained after job cancellation
+env.get_checkpoint_config().enable_externalized_checkpoints(ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION)
+
+# allow job recovery fallback to checkpoint when there is a more recent savepoint
+env.get_checkpoint_config().set_prefer_checkpoint_for_recovery(True)
+{% endhighlight %}
+</div>
 </div>
 
 ### Related Config Options
@@ -140,7 +173,7 @@ Some more parameters and/or defaults may be set via `conf/flink-conf.yaml` (see 
 
 ## Selecting a State Backend
 
-Flink's [checkpointing mechanism]({{ site.baseurl }}/internals/stream_checkpointing.html) stores consistent snapshots
+Flink's [checkpointing mechanism]({{ site.baseurl }}/learn-flink/fault_tolerance.html) stores consistent snapshots
 of all the state in timers and stateful operators, including connectors, windows, and any [user-defined state](state.html).
 Where the checkpoints are stored (e.g., JobManager memory, file system, database) depends on the configured
 **State Backend**. 

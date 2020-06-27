@@ -27,6 +27,8 @@ import org.apache.flink.util.Preconditions;
 import javax.annotation.Nullable;
 
 import java.lang.reflect.Array;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -43,7 +45,7 @@ public final class CollectionDataType extends DataType {
 			LogicalType logicalType,
 			@Nullable Class<?> conversionClass,
 			DataType elementDataType) {
-		super(logicalType, conversionClass);
+		super(logicalType, ensureArrayConversionClass(logicalType, elementDataType, conversionClass));
 		this.elementDataType = Preconditions.checkNotNull(elementDataType, "Element data type must not be null.");
 	}
 
@@ -78,17 +80,17 @@ public final class CollectionDataType extends DataType {
 		return new CollectionDataType(
 			logicalType,
 			Preconditions.checkNotNull(newConversionClass, "New conversion class must not be null."),
-			elementDataType);
+			ensureElementConversionClass(elementDataType, newConversionClass));
 	}
 
 	@Override
-	public Class<?> getConversionClass() {
-		// arrays are a special case because their default conversion class depends on the
-		// conversion class of the element type
-		if (logicalType.getTypeRoot() == LogicalTypeRoot.ARRAY && conversionClass == null) {
-			return Array.newInstance(elementDataType.getConversionClass(), 0).getClass();
-		}
-		return super.getConversionClass();
+	public List<DataType> getChildren() {
+		return Collections.singletonList(elementDataType);
+	}
+
+	@Override
+	public <R> R accept(DataTypeVisitor<R> visitor) {
+		return visitor.visit(this);
 	}
 
 	@Override
@@ -109,5 +111,30 @@ public final class CollectionDataType extends DataType {
 	@Override
 	public int hashCode() {
 		return Objects.hash(super.hashCode(), elementDataType);
+	}
+
+	// --------------------------------------------------------------------------------------------
+
+	private static Class<?> ensureArrayConversionClass(
+			LogicalType logicalType,
+			DataType elementDataType,
+			@Nullable Class<?> clazz) {
+		// arrays are a special case because their default conversion class depends on the
+		// conversion class of the element type
+		if (logicalType.getTypeRoot() == LogicalTypeRoot.ARRAY && clazz == null) {
+			return Array.newInstance(elementDataType.getConversionClass(), 0).getClass();
+		}
+		return clazz;
+	}
+
+	private DataType ensureElementConversionClass(
+			DataType elementDataType,
+			Class<?> clazz) {
+		// arrays are a special case because their element conversion class depends on the
+		// outer conversion class
+		if (logicalType.getTypeRoot() == LogicalTypeRoot.ARRAY && clazz.isArray()) {
+			return elementDataType.bridgedTo(clazz.getComponentType());
+		}
+		return elementDataType;
 	}
 }
