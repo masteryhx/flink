@@ -30,9 +30,9 @@
 #
 
 trigger:
-  branches:
+  branches: 
     include:
-    - '*'  # must quote since "*" is a YAML reserved character; we want a string
+    - 'FLINK-30854'  # must quote since "*" is a YAML reserved character; we want a string
 
 resources:
   containers:
